@@ -13,6 +13,21 @@ const server = setupServer(...hub.handlers);
 const builder = new HubConnectionBuilder()
   .withUrl(hubUrl)
   .configureLogging(LogLevel.Error);
+hub.server.on('invoke', ({connection, id, target, parameters}) => {
+  if (target === "add") {
+    let result = null, error = null;
+    let [x, y] = parameters;
+    if (typeof(x) === 'number' && typeof(y) === 'number') {
+      result = x + y;
+    } else {
+      error = "Arguments must be numbers";
+    }
+
+    if (id) {
+      connection.complete(id, result, error);
+    }
+  }
+})
 
 beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
@@ -74,5 +89,25 @@ describe("signalR handler", () => {
     for (const r of received) {
       expect(await r).toStrictEqual(["hello", "world"]);
     }
+  });
+
+  it("can handle an invocation", async () => {
+    const connection = builder.build();
+    await connection.start();
+    let res = await connection.invoke("add", 40, 2);
+    expect(res).toStrictEqual(42);
+
+    res = await connection.invoke("add", 400, 9);
+    expect(res).toStrictEqual(409);
+
+    await expect(connection.invoke("add", 400, {junk: 100})).rejects.
+      toThrow("must be numbers");
+  });
+
+  it("can handle an invocation without response", async () => {
+    const connection = builder.build();
+    await connection.start();
+    let res = await connection.send("add", 40, 2);
+    expect(res).toStrictEqual(undefined);
   });
 });

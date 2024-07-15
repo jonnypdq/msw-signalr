@@ -1,4 +1,5 @@
 import { HttpHandler, HttpResponse, delay, http } from "msw";
+import mitt from "mitt";
 import {
   BAD_REQUEST,
   CLOSE,
@@ -6,6 +7,7 @@ import {
   NOT_IMPLEMENTED,
   PING,
   SEND,
+  COMPLETE
 } from "./constants";
 import { negotiate } from "./negotiate";
 import {
@@ -21,7 +23,19 @@ type Connection = {
   id: string;
   stream: TransformStream<SignalRMessage, Record<string, unknown>>;
   send(target: string, ...args: unknown[]): Promise<void>;
+  complete(invocationId: string, result: unknown, error?: unknown): Promise<void>;
   close(): Promise<void>;
+};
+
+type SignalRInvoke = {
+  connection: Connection,
+  id?: string,
+  target: string,
+  parameters: unknown[]
+};
+
+type SignalREvents = {
+  invoke: SignalRInvoke
 };
 
 export default function (
@@ -29,10 +43,12 @@ export default function (
   options: { keepAliveInterval?: number; delay?: typeof delay } = {}
 ): {
   connections: Map<string, Connection>;
+  server: mitt<SignalREvents>;
   broadcast(target: string, ...args: unknown[]): void;
   handlers: HttpHandler[];
 } {
   const connections = new Map<string, Connection>();
+  const server = mitt<SignalRMessage>(); 
 
   const findConnection = (request: Request) => {
     const url = new URL(request.url);
@@ -42,6 +58,7 @@ export default function (
 
   return {
     connections,
+    server,
     broadcast(target, ...args) {
       connections.forEach((connection) => {
         connection.send(target, ...args).catch(console.error);
@@ -77,9 +94,17 @@ export default function (
           stream: new TransformStream(),
           async send(target, ...args) {
             await write(this.stream.writable, {
-              type: 1,
+              type: SEND,
               target,
               arguments: args,
+            });
+          },
+          async complete(invocationId, result, error = undefined) {
+            await write(this.stream.writable, {
+              type: COMPLETE,
+              invocationId,
+              result,
+              error
             });
           },
           async close() {
@@ -116,11 +141,12 @@ export default function (
         // eslint-disable-next-line no-control-regex
         const payload = (await request.text()).replace(/\x1e$/, "");
         let message: { protocol: string; version: number } | { type: number };
+        let parsed: SignalRMessage = {};
         try {
-          const parsed = JSON.parse(payload) as unknown;
+          parsed = JSON.parse(payload);
           if (isNegotiation(parsed) || isMessage(parsed)) message = parsed;
           else return new HttpResponse(null, { status: BAD_REQUEST });
-        } catch {
+        } catch (e) {
           return new HttpResponse(null, { status: BAD_REQUEST });
         }
         if (
@@ -132,7 +158,10 @@ export default function (
         }
         if (isMessage(message)) {
           if (message.type === SEND) {
-            return new HttpResponse(null, { status: NOT_IMPLEMENTED });
+            let id = message.invocationId;
+            server.emit('invoke', {connection, target: message.target,
+              id, parameters: message.arguments});
+            return new HttpResponse();
           }
           if (message.type === PING) {
             return new HttpResponse();

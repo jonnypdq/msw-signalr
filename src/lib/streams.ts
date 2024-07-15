@@ -5,6 +5,7 @@ export type SignalRMessage =
   | { type: typeof PING | typeof CLOSE }
   | {
       type: typeof SEND;
+      invocationId?: string;
       target: string;
       arguments: unknown[];
     };
