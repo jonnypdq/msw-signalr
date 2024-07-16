@@ -1,8 +1,14 @@
-import { CLOSE, DEFAULT_KEEPALIVE_INTERVAL, PING, SEND } from "./constants";
+import { CLOSE, COMPLETE, DEFAULT_KEEPALIVE_INTERVAL, PING, SEND } from "./constants";
 
 export type SignalRMessage =
   | Record<string, never>
   | { type: typeof PING | typeof CLOSE }
+  | {
+      type: typeof COMPLETE;
+      invocationId: string;
+      result: any;
+      error?: string | undefined;
+    }
   | {
       type: typeof SEND;
       invocationId?: string;

@@ -1,10 +1,9 @@
 import { HttpHandler, HttpResponse, delay, http } from "msw";
-import mitt from "mitt";
+import mitt, { Emitter } from "mitt";
 import {
   BAD_REQUEST,
   CLOSE,
   NOT_FOUND,
-  NOT_IMPLEMENTED,
   PING,
   SEND,
   COMPLETE
@@ -29,7 +28,7 @@ type Connection = {
 
 type SignalRInvoke = {
   connection: Connection,
-  id?: string,
+  id?: string | undefined,
   target: string,
   parameters: unknown[]
 };
@@ -43,12 +42,12 @@ export default function (
   options: { keepAliveInterval?: number; delay?: typeof delay } = {}
 ): {
   connections: Map<string, Connection>;
-  server: mitt<SignalREvents>;
+  server: Emitter<SignalREvents>;
   broadcast(target: string, ...args: unknown[]): void;
   handlers: HttpHandler[];
 } {
   const connections = new Map<string, Connection>();
-  const server = mitt<SignalRMessage>(); 
+  const server = mitt<SignalREvents>(); 
 
   const findConnection = (request: Request) => {
     const url = new URL(request.url);
@@ -99,7 +98,7 @@ export default function (
               arguments: args,
             });
           },
-          async complete(invocationId, result, error = undefined) {
+          async complete(invocationId, result, error?: string) {
             await write(this.stream.writable, {
               type: COMPLETE,
               invocationId,
@@ -157,16 +156,16 @@ export default function (
           return new HttpResponse();
         }
         if (isMessage(message)) {
-          if (message.type === SEND) {
-            let id = message.invocationId;
-            server.emit('invoke', {connection, target: message.target,
-              id, parameters: message.arguments});
+          if (parsed.type === SEND) {
+            let id = parsed.invocationId;
+            server.emit('invoke', {connection, target: parsed.target,
+              id, parameters: parsed.arguments});
             return new HttpResponse();
           }
-          if (message.type === PING) {
+          if (parsed.type === PING) {
             return new HttpResponse();
           }
-          if (message.type === CLOSE) {
+          if (parsed.type === CLOSE) {
             await connection.stream.writable.close();
             connections.delete(connection.key);
             return new HttpResponse();
